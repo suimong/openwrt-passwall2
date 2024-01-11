@@ -129,19 +129,6 @@ function gen_outbound(flag, node, tag, proxy_table)
 			}
 		end
 
-		local mux = nil
-		if node.mux == "1" then
-			mux = {
-				enabled = true,
-				padding = (node.mux_padding == "1") and true or false,
-				brutal = {
-					enabled = (node.tcpbrutal == "1") and true or false,
-					up_mbps = tonumber(node.tcpbrutal_up_mbps) or 10,
-					down_mbps = tonumber(node.tcpbrutal_down_mbps) or 50,
-				},
-			}
-		end
-
 		local v2ray_transport = nil
 
 		if node.transport == "http" then
@@ -426,6 +413,19 @@ function gen_config_server(node)
 			key = (node.ech_key and node.ech_key:gsub("\\n","\n")) and node.ech_key:gsub("\\n","\n") or nil,
 			pq_signature_schemes_enabled = (node.pq_signature_schemes_enabled == "1") and true or false,
 			dynamic_record_sizing_disabled = (node.dynamic_record_sizing_disabled == "1") and true or false,
+		}
+	end
+
+	local mux = nil
+	if node.mux == "1" then
+		mux = {
+			enabled = true,
+			padding = (node.mux_padding == "1") and true or false,
+			brutal = {
+				enabled = (node.tcpbrutal == "1") and true or false,
+				up_mbps = tonumber(node.tcpbrutal_up_mbps) or 10,
+				down_mbps = tonumber(node.tcpbrutal_down_mbps) or 50,
+			},
 		}
 	end
 
@@ -1051,8 +1051,29 @@ function gen_config(var)
 							table.insert(protocols, w)
 						end)
 					end
+
+					local inboundTag = nil
+					if e["inbound"] and e["inbound"] ~= "" then
+						inboundTag = {}
+						if e["inbound"]:find("tproxy") then
+							if redir_port then
+								if tcp_proxy_way == "tproxy" then
+									table.insert(inboundTag, "tproxy")
+								else
+									table.insert(inboundTag, "redirect_tcp")
+									table.insert(inboundTag, "tproxy_udp")
+								end
+							end
+						end
+						if e["inbound"]:find("socks") then
+							if local_socks_port then
+								table.insert(inboundTag, "socks-in")
+							end
+						end
+					end
 					
 					local rule = {
+						inbound = inboundTag,
 						outbound = outboundTag,
 						invert = false, --匹配反选
 						protocol = protocols
@@ -1239,10 +1260,6 @@ function gen_config(var)
 			remote_strategy = "ipv6_only"
 		end
 
-		if remote_dns_detour == "direct" then
-			default_outTag = "direct"
-		end
-
 		local remote_server = {
 			tag = "remote",
 			address_strategy = "prefer_ipv4",
@@ -1250,6 +1267,10 @@ function gen_config(var)
 			address_resolver = "direct",
 			detour = default_outTag,
 		}
+
+		if remote_dns_detour == "direct" then
+			remote_server.detour = "direct"
+		end
 
 		if remote_dns_udp_server then
 			local server_port = tonumber(remote_dns_udp_port) or 53
@@ -1283,15 +1304,14 @@ function gen_config(var)
 				strategy = remote_strategy,
 			})
 
-			if tags and tags:find("with_clash_api") then
-				if not experimental then
-					experimental = {}
-				end
-				experimental.clash_api = {
-					store_fakeip = true,
-					cache_file = "/tmp/singbox_passwall2_" .. flag .. ".db"
-				}
+			if not experimental then
+				experimental = {}
 			end
+			experimental.cache_file = {
+				enabled = true,
+				store_fakeip = true,
+				path = "/tmp/singbox_passwall2_" .. flag .. ".db"
+			}
 		end
 	
 		if direct_dns_udp_server then
@@ -1352,7 +1372,8 @@ function gen_config(var)
 					}
 					if value.outboundTag ~= "block" and value.outboundTag ~= "direct" then
 						dns_rule.server = "remote"
-						if value.outboundTag ~= "default" and remote_server.address and remote_server.detour ~= "direct" then
+						dns_rule.rewrite_ttl = 30
+						if value.outboundTag ~= "default" and remote_server.address and remote_dns_detour ~= "direct" then
 							local remote_dns_server = api.clone(remote_server)
 							remote_dns_server.tag = value.outboundTag
 							remote_dns_server.detour = value.outboundTag
@@ -1403,11 +1424,14 @@ function gen_config(var)
 			end
 			if direct_nftset then
 				string.gsub(direct_nftset, '[^' .. "," .. ']+', function(w)
-					local s = string.reverse(w)
-					local _, i = string.find(s, "#")
-					local m = string.len(s) - i + 1
-					local n = w:sub(m + 1)
-					sys.call("nft flush set inet fw4 " .. n .. " 2>/dev/null")
+					local split = api.split(w, "#")
+					if #split > 3 then
+						local ip_type = split[1]
+						local family = split[2]
+						local table_name = split[3]
+						local set_name = split[4]
+						sys.call(string.format("nft flush set %s %s %s 2>/dev/null", family, table_name, set_name))
+					end
 				end)
 			end
 		end
