@@ -10,7 +10,7 @@ jsonc = require "luci.jsonc"
 i18n = require "luci.i18n"
 
 appname = "passwall2"
-curl_args = {"-skfL", "--connect-timeout 3", "--retry 3", "-m 60"}
+curl_args = { "-skfL", "--connect-timeout 3", "--retry 3" }
 command_timeout = 300
 OPENWRT_ARCH = nil
 DISTRIB_ARCH = nil
@@ -73,7 +73,7 @@ end
 
 function curl_proxy(url, file, args)
 	--使用代理
-	local socks_server = luci.sys.exec("[ -f /tmp/etc/passwall2/global_SOCKS_server ] && echo -n $(cat /tmp/etc/passwall2/global_SOCKS_server) || echo -n ''")
+	local socks_server = luci.sys.exec("[ -f /tmp/etc/passwall2/acl/default/SOCKS_server ] && echo -n $(cat /tmp/etc/passwall2/acl/default/SOCKS_server) || echo -n ''")
 	if socks_server ~= "" then
 		if not args then args = {} end
 		local tmp_args = clone(args)
@@ -292,7 +292,7 @@ function get_domain_from_url(url)
 end
 
 function get_valid_nodes()
-	local nodes_ping = uci_get_type("global_other", "nodes_ping") or ""
+	local show_node_info = uci_get_type("global_other", "show_node_info") or "0"
 	local nodes = {}
 	uci:foreach(appname, "nodes", function(e)
 		e.id = e[".name"]
@@ -319,7 +319,7 @@ function get_valid_nodes()
 					end
 					if is_ipv6(address) then address = get_ipv6_full(address) end
 					e["remark"] = "%s：[%s]" % {type, e.remarks}
-					if nodes_ping:find("info") then
+					if show_node_info == "1" then
 						e["remark"] = "%s：[%s] %s:%s" % {type, e.remarks, address, e.port}
 					end
 					e.node_type = "normal"
@@ -805,7 +805,10 @@ function to_download(app_name, url, size)
 		end
 	end
 
-	local return_code, result = curl_logic(url, tmp_file, curl_args)
+	local _curl_args = clone(curl_args)
+	table.insert(_curl_args, "-m 60")
+
+	local return_code, result = curl_logic(url, tmp_file, _curl_args)
 	result = return_code == 0
 
 	if not result then
