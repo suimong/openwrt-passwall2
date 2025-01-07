@@ -2,6 +2,10 @@ local api = require "luci.passwall2.api"
 local appname = api.appname
 local sys = api.sys
 
+local port_validate = function(self, value, t)
+	return value:gsub("-", ":")
+end
+
 m = Map(appname)
 api.set_apply_on_parse(m)
 
@@ -63,7 +67,12 @@ o.rmempty = false
 ---- Remarks
 o = s:option(Value, "remarks", translate("Remarks"))
 o.default = arg[1]
-o.rmempty = true
+o.rmempty = false
+
+o = s:option(ListValue, "interface", translate("Source Interface"))
+o:value("", translate("All"))
+local wa = require "luci.tools.webadmin"
+wa.cbi_add_networks(o)
 
 local mac_t = {}
 sys.net.mac_hints(function(e, t)
@@ -98,6 +107,7 @@ sources.cast = "string"
 for _, key in pairs(mac_t) do
 	sources:value(key.mac, "%s (%s)" % {key.mac, key.ip})
 end
+
 sources.cfgvalue = function(self, section)
 	local value
 	if self.tag_error[section] then
@@ -152,49 +162,87 @@ end
 sources.write = dynamicList_write
 
 ---- TCP No Redir Ports
+local TCP_NO_REDIR_PORTS = m:get("@global_forwarding[0]", "tcp_no_redir_ports")
 o = s:option(Value, "tcp_no_redir_ports", translate("TCP No Redir Ports"))
-o.default = "default"
+o:value("", translate("Use global config") .. "(" .. TCP_NO_REDIR_PORTS .. ")")
 o:value("disable", translate("No patterns are used"))
-o:value("default", translate("Default"))
 o:value("1:65535", translate("All"))
+o.validate = port_validate
 
 ---- UDP No Redir Ports
+local UDP_NO_REDIR_PORTS = m:get("@global_forwarding[0]", "udp_no_redir_ports")
 o = s:option(Value, "udp_no_redir_ports", translate("UDP No Redir Ports"),
 	"<font color='red'>" ..
 	translate("If you don't want to let the device in the list to go proxy, please choose all.") ..
 	"</font>")
-o.default = "default"
+o:value("", translate("Use global config") .. "(" .. UDP_NO_REDIR_PORTS .. ")")
 o:value("disable", translate("No patterns are used"))
-o:value("default", translate("Default"))
 o:value("1:65535", translate("All"))
+o.validate = port_validate
+
+o = s:option(DummyValue, "_hide_node_option", "")
+o.template = "passwall2/cbi/hidevalue"
+o.value = "1"
+o:depends({ tcp_no_redir_ports = "1:65535", udp_no_redir_ports = "1:65535" })
+if TCP_NO_REDIR_PORTS == "1:65535" and UDP_NO_REDIR_PORTS == "1:65535" then
+	o:depends({ tcp_no_redir_ports = "", udp_no_redir_ports = "" })
+end
+
+local GLOBAL_ENABLED = m:get("@global[0]", "enabled")
+local NODE = m:get("@global[0]", "node")
+o = s:option(ListValue, "node", "<a style='color: red'>" .. translate("Node") .. "</a>")
+if GLOBAL_ENABLED == "1" and NODE then
+	o:value("", translate("Use global config") .. "(" .. api.get_node_name(NODE) .. ")")
+end
+o:depends({ _hide_node_option = "1",  ['!reverse'] = true })
+
+o = s:option(DummyValue, "_hide_dns_option", "")
+o.template = "passwall2/cbi/hidevalue"
+o.value = "1"
+o:depends({ node = "" })
+if GLOBAL_ENABLED == "1" and NODE then
+	o:depends({ node = NODE })
+end
+
+o = s:option(DummyValue, "_xray_node", "")
+o.template = "passwall2/cbi/hidevalue"
+o.value = "1"
+o:depends({ __hide = true })
 
 ---- TCP Redir Ports
+local TCP_REDIR_PORTS = m:get("@global_forwarding[0]", "tcp_redir_ports")
 o = s:option(Value, "tcp_redir_ports", translate("TCP Redir Ports"))
-o.default = "default"
-o:value("default", translate("Default"))
+o:value("", translate("Use global config") .. "(" .. TCP_REDIR_PORTS .. ")")
 o:value("1:65535", translate("All"))
 o:value("22,25,53,143,465,587,853,993,995,80,443", translate("Common Use"))
 o:value("80,443", "80,443")
+o.validate = port_validate
+o:depends({ _hide_node_option = "1",  ['!reverse'] = true })
 
 ---- UDP Redir Ports
+local UDP_REDIR_PORTS = m:get("@global_forwarding[0]", "udp_redir_ports")
 o = s:option(Value, "udp_redir_ports", translate("UDP Redir Ports"))
-o.default = "default"
-o:value("default", translate("Default"))
+o:value("", translate("Use global config") .. "(" .. UDP_REDIR_PORTS .. ")")
 o:value("1:65535", translate("All"))
+o.validate = port_validate
+o:depends({ _hide_node_option = "1",  ['!reverse'] = true })
 
-node = s:option(ListValue, "node", "<a style='color: red'>" .. translate("Node") .. "</a>")
-node.default = "default"
-node:value("default", translate("Default"))
+o = s:option(ListValue, "direct_dns_query_strategy", translate("Direct Query Strategy"))
+o.default = "UseIP"
+o:value("UseIP")
+o:value("UseIPv4")
+o:value("UseIPv6")
+o:depends({ _hide_dns_option = "1",  ['!reverse'] = true })
 
-for k, v in pairs(nodes_table) do
-	node:value(v.id, v["remark"])
-end
+o = s:option(Flag, "write_ipset_direct", translate("Direct DNS result write to IPSet"), translate("Perform the matching direct domain name rules into IP to IPSet/NFTSet, and then connect directly (not entering the core). Maybe conflict with some special circumstances."))
+o.default = "1"
+o:depends({ direct_dns_query_strategy = "",  ['!reverse'] = true })
 
 o = s:option(ListValue, "remote_dns_protocol", translate("Remote DNS Protocol"))
 o:value("tcp", "TCP")
 o:value("doh", "DoH")
 o:value("udp", "UDP")
-o:depends({ node = "default",  ['!reverse'] = true })
+o:depends({ _hide_dns_option = "1",  ['!reverse'] = true })
 
 ---- DNS Forward
 o = s:option(Value, "remote_dns", translate("Remote DNS"))
@@ -205,6 +253,7 @@ o:value("1.1.1.2", "1.1.1.2 (CloudFlare-Security)")
 o:value("8.8.4.4", "8.8.4.4 (Google)")
 o:value("8.8.8.8", "8.8.8.8 (Google)")
 o:value("9.9.9.9", "9.9.9.9 (Quad9-Recommended)")
+o:value("149.112.112.112", "149.112.112.112 (Quad9-Recommended)")
 o:value("208.67.220.220", "208.67.220.220 (OpenDNS)")
 o:value("208.67.222.222", "208.67.222.222 (OpenDNS)")
 o:depends("remote_dns_protocol", "tcp")
@@ -216,7 +265,8 @@ o:value("https://1.1.1.1/dns-query", "CloudFlare")
 o:value("https://1.1.1.2/dns-query", "CloudFlare-Security")
 o:value("https://8.8.4.4/dns-query", "Google 8844")
 o:value("https://8.8.8.8/dns-query", "Google 8888")
-o:value("https://9.9.9.9/dns-query", "Quad9-Recommended")
+o:value("https://9.9.9.9/dns-query", "Quad9-Recommended 9.9.9.9")
+o:value("https://149.112.112.112/dns-query", "Quad9-Recommended 149.112.112.112")
 o:value("https://208.67.222.222/dns-query", "OpenDNS")
 o:value("https://dns.adguard.com/dns-query,176.103.130.130", "AdGuard")
 o:value("https://doh.libredns.gr/dns-query,116.202.176.26", "LibreDNS")
@@ -231,6 +281,7 @@ o.description = translate("Notify the DNS server when the DNS query is notified,
 o.datatype = "ipaddr"
 o:depends("remote_dns_protocol", "tcp")
 o:depends("remote_dns_protocol", "doh")
+o:depends("remote_dns_protocol", "udp")
 
 o = s:option(ListValue, "remote_dns_detour", translate("Remote DNS Outbound"))
 o.default = "remote"
@@ -256,11 +307,27 @@ o:depends("remote_dns_protocol", "tcp")
 o:depends("remote_dns_protocol", "doh")
 o:depends("remote_dns_protocol", "udp")
 
-hosts = s:option(TextValue, "dns_hosts", translate("Domain Override"))
-hosts.rows = 5
-hosts.wrap = "off"
-hosts:depends("remote_dns_protocol", "tcp")
-hosts:depends("remote_dns_protocol", "doh")
-hosts:depends("remote_dns_protocol", "udp")
+o = s:option(TextValue, "dns_hosts", translate("Domain Override"))
+o.rows = 5
+o.wrap = "off"
+o:depends({ __hide = true })
+o.remove = function(self, section)
+	local node_value = s.fields["node"]:formvalue(arg[1])
+	if node_value then
+		local node_t = m:get(node_value) or {}
+		if node_t.type == "Xray" then
+			AbstractValue.remove(self, section)
+		end
+	end
+end
+
+for k, v in pairs(nodes_table) do
+	s.fields["node"]:value(v.id, v["remark"])
+	if v.type == "Xray" then
+		s.fields["_xray_node"]:depends({ node = v.id })
+	end
+end
+
+s.fields["dns_hosts"]:depends({ _xray_node = "1" })
 
 return m

@@ -3,6 +3,7 @@ config global
 	option enabled '0'
 	option node_socks_port '1070'
 	option localhost_proxy '1'
+	option client_proxy '1'
 	option socks_enabled '0'
 	option acl_enable '0'
 	option node 'myshunt'
@@ -13,14 +14,13 @@ config global
 	option remote_dns_query_strategy 'UseIPv4'
 	option dns_hosts 'cloudflare-dns.com 1.1.1.1
 dns.google.com 8.8.8.8'
-	option close_log '0'
+	option log_node '1'
 	option loglevel 'error'
 	
 config global_haproxy
 	option balancing_enable '0'
 
 config global_delay
-	option auto_on '0'
 	option start_daemon '1'
 	option start_delay '60'
 
@@ -35,21 +35,21 @@ config global_forwarding
 	option ipv6_tproxy '0'
 
 config global_xray
-	option sniffing '1'
-	option route_only '0'
+	option sniffing_override_dest '0'
 
 config global_other
-	option nodes_ping 'auto_ping tcping'
+	option auto_detection_time 'tcping'
+	option show_node_info '0'
 
 config global_rules
 	option auto_update '0'
 	option geosite_update '1'
 	option geoip_update '1'
 	option v2ray_location_asset '/usr/share/v2ray/'
+	option enable_geoview '1'
 
 config global_app
 	option xray_file '/usr/bin/xray'
-	option brook_file '/usr/bin/brook'
 	option hysteria_file '/usr/bin/hysteria'
 	option singbox_file '/usr/bin/sing-box'
 
@@ -63,9 +63,9 @@ config global_subscribe
 config global_singbox
 	option sniff_override_destination '0'
 	option geoip_path '/usr/share/singbox/geoip.db'
-	option geoip_url 'https://github.com/SagerNet/sing-geoip/releases/latest/download/geoip.db'
+	option geoip_url 'https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.db'
 	option geosite_path '/usr/share/singbox/geosite.db'
-	option geosite_url 'https://github.com/SagerNet/sing-geosite/releases/latest/download/geosite.db'
+	option geosite_url 'https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.db'
 
 config nodes 'myshunt'
 	option remarks '分流总节点'
@@ -75,13 +75,10 @@ config nodes 'myshunt'
 	option ProxyGame '_default'
 	option Direct '_direct'
 	option GooglePlay '_default'
-	option Netflix 'nil'
-	option OpenAI 'nil'
 	option Proxy '_default'
 	option China '_direct'
 	option QUIC '_blackhole'
-	option UDP 'nil'
-	option default_node 'nil'
+	option default_node '_direct'
 	option domainStrategy 'IPOnDemand'
 	option domainMatcher 'hybrid'
 
@@ -143,7 +140,7 @@ geosite:category-games@cn
 
 config shunt_rules 'ProxyGame'
 	option remarks 'ProxyGame'
-	option domain_list 'geosite:category-games@!cn
+	option domain_list 'geosite:category-games
 domain:store.steampowered.com
 '
 
